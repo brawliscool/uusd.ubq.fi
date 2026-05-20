@@ -18,8 +18,7 @@ import { INVENTORY_TOKENS, type TokenBalance } from "../types/inventory.types.ts
 import { areAddressesEqual } from "../utils/format-utils.ts";
 import type { CowSwapService } from "../services/cowswap-service.ts";
 import tokenList from "../constants/token-list.json" with { type: "json" };
-
-const MIN_VISIBLE_TOKEN_USD_VALUE = 1;
+import { MIN_VISIBLE_TOKEN_USD_VALUE } from "../constants/token-visibility-constants.ts";
 
 interface SimplifiedExchangeServices {
   walletService: WalletService;

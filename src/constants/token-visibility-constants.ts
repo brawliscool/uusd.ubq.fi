@@ -1,0 +1,1 @@
+export const MIN_VISIBLE_TOKEN_USD_VALUE = 1;

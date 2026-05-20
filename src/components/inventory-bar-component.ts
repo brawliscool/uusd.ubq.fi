@@ -8,10 +8,9 @@ import type { CentralizedRefreshService, RefreshData } from "../services/central
 import type { TokenBalance, InventoryBarState } from "../types/inventory.types.ts";
 import { formatTokenAmount, formatUsdValue, calculateTotalUsdValue, isBalanceZero } from "../utils/token-utils.ts";
 import { batchFetchTokenBalances } from "../utils/batch-request-utils.ts";
+import { MIN_VISIBLE_TOKEN_USD_VALUE } from "../constants/token-visibility-constants.ts";
 
 import icons from "./icons.ts";
-
-const MIN_VISIBLE_TOKEN_USD_VALUE = 1;
 
 /**
  * Service dependencies for InventoryBarComponent
