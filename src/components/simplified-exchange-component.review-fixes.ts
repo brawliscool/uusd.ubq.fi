@@ -7,12 +7,14 @@ import { isBalanceZero } from "../utils/token-utils.ts";
 import { SimplifiedExchangeComponent } from "./simplified-exchange-component.ts";
 
 type SelectedToken = { address: Address; symbol: string; decimals: number };
+type InventoryBarLike = { getBalances?: () => TokenBalance[]; refreshBalances?: () => Promise<void> | void };
 type ExchangeInternals = {
   _state: { direction: string; amount: string; routeResult: unknown; isCalculating: boolean };
-  _services: { notificationManager: { showSuccess: (scope: string, message: string) => void }; inventoryBar: unknown };
+  _services: { notificationManager: { showSuccess: (scope: string, message: string) => void }; inventoryBar: InventoryBarLike };
   _transactionStateService: { completeTransaction: (buttonId: string, text: string) => void };
   _renderOutput: () => void;
   _getSelectedToken: () => SelectedToken | null;
+  _getVisibleTokenBalances: (balances: TokenBalance[]) => TokenBalance[];
 };
 
 const proto = SimplifiedExchangeComponent.prototype as unknown as Record<string, unknown>;
@@ -20,6 +22,53 @@ const originalCalculateRoute = proto._calculateRoute as (this: ExchangeInternals
 const originalRenderOptions = proto._renderOptions as (this: ExchangeInternals) => void;
 const originalUpdateActionButton = proto._updateActionButton as (this: ExchangeInternals) => Promise<void>;
 const originalPopulateMaxBalance = proto._populateMaxBalance as (this: ExchangeInternals, force: boolean) => boolean;
+
+function appendTokenOption(group: HTMLOptGroupElement, balance: TokenBalance): void {
+  const option = document.createElement("option");
+  option.value = balance.address;
+  option.setAttribute("data-decimals", balance.decimals.toString());
+  option.setAttribute("data-symbol", balance.symbol);
+  option.text = balance.symbol.substring(0, 10);
+  group.appendChild(option);
+}
+
+proto._renderTokenOptions = function renderTokenOptions(this: ExchangeInternals): void {
+  const selectEl = document.querySelector("#tokenSelect") as HTMLSelectElement | null;
+  const yourTokenGroup = document.getElementById("yourTokenGroup") as HTMLOptGroupElement | null;
+  const otherTokenGroup = document.getElementById("otherTokenGroup") as HTMLOptGroupElement | null;
+  if (!selectEl || !yourTokenGroup || !otherTokenGroup) {
+    return;
+  }
+
+  const selectedValue = selectEl.value;
+  yourTokenGroup.querySelectorAll("option").forEach((opt) => opt.remove());
+  otherTokenGroup.querySelectorAll("option").forEach((opt) => opt.remove());
+
+  const walletBalances = this._services.inventoryBar.getBalances?.() ?? [];
+  if (walletBalances.length > 0) {
+    yourTokenGroup.style.display = "";
+    otherTokenGroup.style.display = "none";
+
+    this._getVisibleTokenBalances(walletBalances).forEach((balance) => appendTokenOption(yourTokenGroup, balance));
+
+    if (yourTokenGroup.querySelectorAll("option").length === 0) {
+      const option = document.createElement("option");
+      option.text = "No selectable tokens";
+      option.value = "";
+      option.disabled = true;
+      option.selected = true;
+      yourTokenGroup.appendChild(option);
+    }
+  } else {
+    yourTokenGroup.style.display = "none";
+    otherTokenGroup.style.display = "";
+    appendTokenOption(otherTokenGroup, INVENTORY_TOKENS.LUSD);
+  }
+
+  if (selectedValue && [...selectEl.options].some((option) => option.value === selectedValue)) {
+    selectEl.value = selectedValue;
+  }
+};
 
 proto._getSelectedToken = function getSelectedToken(): SelectedToken | null {
   const selectEl = document.getElementById("tokenSelect") as HTMLSelectElement | null;
@@ -113,8 +162,7 @@ proto._handleTransactionSuccess = function handleTransactionSuccess(this: Exchan
   if (amountInput) amountInput.value = "";
   this._renderOutput();
 
-  const inventoryBar = this._services.inventoryBar as { refreshBalances?: () => Promise<void> | void };
-  void inventoryBar.refreshBalances?.();
+  void this._services.inventoryBar.refreshBalances?.();
 };
 
 proto._isLusdSelected = function isLusdSelected(this: ExchangeInternals): boolean {
