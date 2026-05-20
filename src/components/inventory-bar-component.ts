@@ -11,6 +11,8 @@ import { batchFetchTokenBalances } from "../utils/batch-request-utils.ts";
 
 import icons from "./icons.ts";
 
+const MIN_VISIBLE_TOKEN_USD_VALUE = 1;
+
 /**
  * Service dependencies for InventoryBarComponent
  */
@@ -418,16 +420,18 @@ export class InventoryBarComponent {
       return;
     }
 
-    // Filter out zero balances and render individual token balances
-    const nonZeroBalances = this._state.balances.filter((balance) => !isBalanceZero(balance.balance, balance.decimals));
+    // Filter out zero balances and low-value dust to keep wallet spam out of the inventory view.
+    const visibleBalances = this._state.balances.filter(
+      (balance) => !isBalanceZero(balance.balance, balance.decimals) && (balance.usdValue ?? 0) >= MIN_VISIBLE_TOKEN_USD_VALUE
+    );
 
-    if (nonZeroBalances.length === 0) {
+    if (visibleBalances.length === 0) {
       tokensContainer.innerHTML = '<div class="no-balances-message">No token balances available</div>';
       totalValueElement.textContent = "$0.00";
       return;
     }
 
-    const tokenElements = nonZeroBalances
+    const tokenElements = visibleBalances
       .map((balance) => {
         const amount = formatTokenAmount(balance.balance, balance.decimals);
         const usdValue = balance.usdValue ? formatUsdValue(balance.usdValue) : "";
@@ -447,7 +451,7 @@ export class InventoryBarComponent {
       .join("");
 
     tokensContainer.innerHTML = tokenElements;
-    totalValueElement.textContent = formatUsdValue(this._state.totalUsdValue);
+    totalValueElement.textContent = formatUsdValue(visibleBalances.reduce((total, balance) => total + (balance.usdValue ?? 0), 0));
   }
 
   /**

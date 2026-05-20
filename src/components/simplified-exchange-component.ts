@@ -14,10 +14,12 @@ import type { InventoryBarComponent } from "./inventory-bar-component.ts";
 import { getMaxTokenBalance, hasAvailableBalance } from "../utils/balance-utils.ts";
 import { DEFAULT_SLIPPAGE_PERCENT, DEFAULT_SLIPPAGE_BPS, BASIS_POINTS_DIVISOR } from "../constants/numeric-constants.ts";
 import type { CentralizedRefreshService, RefreshData } from "../services/centralized-refresh-service.ts";
-import { INVENTORY_TOKENS } from "../types/inventory.types.ts";
+import { INVENTORY_TOKENS, type TokenBalance } from "../types/inventory.types.ts";
 import { areAddressesEqual } from "../utils/format-utils.ts";
 import type { CowSwapService } from "../services/cowswap-service.ts";
 import tokenList from "../constants/token-list.json" with { type: "json" };
+
+const MIN_VISIBLE_TOKEN_USD_VALUE = 1;
 
 interface SimplifiedExchangeServices {
   walletService: WalletService;
@@ -114,11 +116,15 @@ export class SimplifiedExchangeComponent {
     if (removeExisting) {
       const existingSelect = document.getElementById("tokenSelect");
       const existingLabel = document.getElementById("tokenLabel");
+      const existingMaxButton = document.getElementById("maxAmountButton");
       if (existingSelect) {
         existingSelect.remove();
       }
       if (existingLabel) {
         existingLabel.remove();
+      }
+      if (existingMaxButton) {
+        existingMaxButton.remove();
       }
     }
     const inputDiv = document.getElementById("input");
@@ -145,12 +151,21 @@ export class SimplifiedExchangeComponent {
     labelSpan.textContent = "UUSD";
     labelSpan.id = "tokenLabel";
 
+    const maxButton = document.createElement("button");
+    maxButton.type = "button";
+    maxButton.id = "maxAmountButton";
+    maxButton.className = "max-amount-button";
+    maxButton.textContent = "Max";
+    maxButton.addEventListener("click", () => this._handleMaxAmountClick());
+
     if (this._state.direction === "deposit") {
       inputDiv.insertBefore(selectEl, inputDiv.firstChild);
+      inputDiv.appendChild(maxButton);
       outputDiv.insertBefore(labelSpan, ubqOutputEl);
     } else if (this._state.direction === "withdraw") {
       outputDiv.insertBefore(selectEl, ubqOutputEl);
       inputDiv.insertBefore(labelSpan, inputDiv.firstChild);
+      inputDiv.appendChild(maxButton);
     }
   }
 
@@ -162,28 +177,15 @@ export class SimplifiedExchangeComponent {
     }
     const yourTokenGroup = document.getElementById("yourTokenGroup") as HTMLOptGroupElement;
     const otherTokenGroup = document.getElementById("otherTokenGroup") as HTMLOptGroupElement;
+    const selectedValue = selectEl.value;
+
+    yourTokenGroup.querySelectorAll("option").forEach((opt) => opt.remove());
+    otherTokenGroup.querySelectorAll("option").forEach((opt) => opt.remove());
 
     if (refreshData?.tokenBalances) {
       yourTokenGroup.style.display = "";
-      otherTokenGroup.style.display = "";
-      if (
-        refreshData.tokenBalances.some((balance) => areAddressesEqual(balance.address, INVENTORY_TOKENS.LUSD.address)) &&
-        !yourTokenGroup.querySelector(`option[value="${INVENTORY_TOKENS.LUSD.address}"i]`)
-      ) {
-        // Ensure LUSD is always in the first position
-        const option = document.createElement("option");
-        option.value = INVENTORY_TOKENS.LUSD.address;
-        option.setAttribute("data-decimals", INVENTORY_TOKENS.LUSD.decimals.toString());
-        option.setAttribute("data-symbol", INVENTORY_TOKENS.LUSD.symbol);
-        option.text = INVENTORY_TOKENS.LUSD.symbol.substring(0, 10);
-        yourTokenGroup.insertBefore(option, yourTokenGroup.firstChild);
-      }
-      refreshData.tokenBalances.forEach((balance) => {
-        if (yourTokenGroup.querySelector(`option[value="${balance.address}"i]`)) {
-          return; // Token already exists
-        }
-        otherTokenGroup.querySelector(`option[value="${balance.address}"i]`)?.remove(); // Remove from other tokens if present
-
+      otherTokenGroup.style.display = "none";
+      this._getVisibleTokenBalances(refreshData.tokenBalances).forEach((balance) => {
         const option = document.createElement("option");
         option.value = balance.address;
         option.setAttribute("data-decimals", balance.decimals.toString());
@@ -191,45 +193,44 @@ export class SimplifiedExchangeComponent {
         option.text = balance.symbol.substring(0, 10);
         yourTokenGroup.appendChild(option);
       });
-      // Remove old user's tokens
-      yourTokenGroup.querySelectorAll("option").forEach((opt) => {
-        if (!refreshData.tokenBalances?.some((balance) => areAddressesEqual(balance.address, opt.value as Address))) {
-          opt.remove();
-        }
-      });
+
+      if (yourTokenGroup.querySelectorAll("option").length === 0) {
+        const option = document.createElement("option");
+        option.text = "No tokens above $1";
+        option.value = "";
+        option.disabled = true;
+        option.selected = true;
+        yourTokenGroup.appendChild(option);
+      }
     } else {
       yourTokenGroup.style.display = "none";
-      yourTokenGroup.querySelectorAll("option").forEach((opt) => opt.remove());
-    }
-
-    if (
-      !yourTokenGroup.querySelector(`option[value="${INVENTORY_TOKENS.LUSD.address}"i]`) &&
-      !otherTokenGroup.querySelector(`option[value="${INVENTORY_TOKENS.LUSD.address}"i]`)
-    ) {
-      // Ensure LUSD is always in the first position
+      otherTokenGroup.style.display = "";
       const option = document.createElement("option");
       option.value = INVENTORY_TOKENS.LUSD.address;
       option.setAttribute("data-decimals", INVENTORY_TOKENS.LUSD.decimals.toString());
       option.setAttribute("data-symbol", INVENTORY_TOKENS.LUSD.symbol);
       option.text = INVENTORY_TOKENS.LUSD.symbol.substring(0, 10);
       otherTokenGroup.insertBefore(option, otherTokenGroup.firstChild);
+      tokenList.forEach((token) => {
+        if ([...selectEl.options].some((opt) => areAddressesEqual(opt.value as Address, token.address as Address))) {
+          return; // Token already exists
+        }
+        const option = document.createElement("option");
+        option.value = token.address;
+        option.setAttribute("data-decimals", token.decimals.toString());
+        option.setAttribute("data-symbol", token.symbol);
+        option.text = token.symbol.substring(0, 10);
+        otherTokenGroup.appendChild(option);
+      });
     }
-    tokenList.forEach((token) => {
-      if ([...selectEl.options].some((opt) => areAddressesEqual(opt.value as Address, token.address as Address))) {
-        return; // Token already exists
-      }
-      const option = document.createElement("option");
-      option.value = token.address;
-      option.setAttribute("data-decimals", token.decimals.toString());
-      option.setAttribute("data-symbol", token.symbol);
-      option.text = token.symbol.substring(0, 10);
-      otherTokenGroup.appendChild(option);
-    });
-    otherTokenGroup.querySelectorAll("option").forEach((opt) => {
-      if (yourTokenGroup.querySelector(`option[value="${opt.value}"i]`)) {
-        opt.remove();
-      }
-    });
+
+    if (selectedValue && [...selectEl.options].some((option) => option.value === selectedValue)) {
+      selectEl.value = selectedValue;
+    }
+  }
+
+  private _getVisibleTokenBalances(balances: TokenBalance[]): TokenBalance[] {
+    return balances.filter((balance) => (balance.usdValue ?? 0) >= MIN_VISIBLE_TOKEN_USD_VALUE);
   }
 
   /**
@@ -432,11 +433,11 @@ export class SimplifiedExchangeComponent {
   private _getSelectedToken() {
     const selectEl = document.getElementById("tokenSelect") as HTMLSelectElement;
     if (!selectEl) {
-      throw new Error("Token select element not found");
+      return INVENTORY_TOKENS.LUSD;
     }
     const selectedOption = selectEl.selectedOptions[0];
-    if (!selectedOption) {
-      throw new Error("No token selected");
+    if (!selectedOption || !selectedOption.value) {
+      return INVENTORY_TOKENS.LUSD;
     }
     const address = selectedOption.value as Address;
     const decimalsAttr = selectedOption.getAttribute("data-decimals");
@@ -458,7 +459,12 @@ export class SimplifiedExchangeComponent {
     }
     this._services.notificationManager.clearNotifications("exchange");
     void this._render();
+    this._autoPopulateMaxBalance();
     void this._calculateRoute();
+  }
+
+  private _handleMaxAmountClick() {
+    this._populateMaxBalance(true);
   }
 
   /**
@@ -621,6 +627,7 @@ export class SimplifiedExchangeComponent {
     // Update input label
     const amountLabel = document.getElementById("amountLabel");
     const amountInput = document.getElementById("exchangeAmount") as HTMLInputElement;
+    const maxAmountButton = document.getElementById("maxAmountButton") as HTMLButtonElement;
 
     if (amountLabel) {
       amountLabel.textContent = this._state.direction === "deposit" ? "LUSD" : "UUSD";
@@ -634,6 +641,10 @@ export class SimplifiedExchangeComponent {
         amountInput.disabled = false;
         amountInput.placeholder = "Enter amount";
       }
+    }
+
+    if (maxAmountButton) {
+      maxAmountButton.disabled = isBalancesLoading || !isConnected;
     }
 
     // Show/hide options based on protocol state and direction
@@ -1143,21 +1154,33 @@ export class SimplifiedExchangeComponent {
     // Only auto-populate if input is empty or zero
     if (amountInput.value && amountInput.value !== "" && amountInput.value !== "0") return;
 
-    try {
-      const selectedToken = this._state.direction === "deposit" ? this._getSelectedToken() : INVENTORY_TOKENS.UUSD;
-      const tokenSymbol = selectedToken.symbol;
-      if (hasAvailableBalance(this._services.inventoryBar, tokenSymbol)) {
-        const maxBalance = getMaxTokenBalance(this._services.inventoryBar, tokenSymbol);
-        amountInput.value = maxBalance;
-        this._state.amount = maxBalance;
-        void this._calculateRoute();
-      } else if (retryCount < 3 && !this._services.inventoryBar.isInitialLoadComplete()) {
-        // If balances not loaded yet, retry
-        this._autoPopulateRetryTimeout = setTimeout(() => this._autoPopulateMaxBalance(retryCount + 1), 100);
-      }
-    } catch (error) {
-      console.error("Error auto-populating max balance:", error);
+    if (!this._populateMaxBalance(false) && retryCount < 3 && !this._services.inventoryBar.isInitialLoadComplete()) {
+      // If balances not loaded yet, retry
+      this._autoPopulateRetryTimeout = setTimeout(() => this._autoPopulateMaxBalance(retryCount + 1), 100);
     }
+  }
+
+  private _populateMaxBalance(force: boolean): boolean {
+    const amountInput = document.getElementById("exchangeAmount") as HTMLInputElement;
+    if (!amountInput) {
+      return false;
+    }
+
+    if (!force && amountInput.value && amountInput.value !== "" && amountInput.value !== "0") {
+      return false;
+    }
+
+    const selectedToken = this._state.direction === "deposit" ? this._getSelectedToken() : INVENTORY_TOKENS.UUSD;
+    const tokenSymbol = selectedToken.symbol;
+    if (!hasAvailableBalance(this._services.inventoryBar, tokenSymbol)) {
+      return false;
+    }
+
+    const maxBalance = getMaxTokenBalance(this._services.inventoryBar, tokenSymbol);
+    amountInput.value = maxBalance;
+    this._state.amount = maxBalance;
+    void this._calculateRoute();
+    return true;
   }
 
   /**
