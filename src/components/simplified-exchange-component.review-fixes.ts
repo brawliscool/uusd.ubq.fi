@@ -4,6 +4,7 @@ import { MIN_VISIBLE_TOKEN_USD_VALUE } from "../constants/inventory-constants.ts
 import { INVENTORY_TOKENS, type TokenBalance } from "../types/inventory.types.ts";
 import { areAddressesEqual } from "../utils/format-utils.ts";
 import { isBalanceZero } from "../utils/token-utils.ts";
+import tokenList from "../constants/token-list.json" with { type: "json" };
 import { SimplifiedExchangeComponent } from "./simplified-exchange-component.ts";
 
 type SelectedToken = { address: Address; symbol: string; decimals: number };
@@ -23,13 +24,25 @@ const originalRenderOptions = proto._renderOptions as (this: ExchangeInternals) 
 const originalUpdateActionButton = proto._updateActionButton as (this: ExchangeInternals) => Promise<void>;
 const originalPopulateMaxBalance = proto._populateMaxBalance as (this: ExchangeInternals, force: boolean) => boolean;
 
-function appendTokenOption(group: HTMLOptGroupElement, balance: TokenBalance): void {
+function appendTokenOption(group: HTMLOptGroupElement, balance: SelectedToken): void {
   const option = document.createElement("option");
   option.value = balance.address;
   option.setAttribute("data-decimals", balance.decimals.toString());
   option.setAttribute("data-symbol", balance.symbol);
   option.text = balance.symbol.substring(0, 10);
   group.appendChild(option);
+}
+
+function appendFallbackTokenOptions(group: HTMLOptGroupElement, excludedAddresses: Set<string>): void {
+  tokenList.forEach((token) => {
+    if (!excludedAddresses.has(token.address.toLowerCase())) {
+      appendTokenOption(group, {
+        address: token.address as Address,
+        symbol: token.symbol,
+        decimals: token.decimals,
+      });
+    }
+  });
 }
 
 proto._renderTokenOptions = function renderTokenOptions(this: ExchangeInternals): void {
@@ -45,13 +58,17 @@ proto._renderTokenOptions = function renderTokenOptions(this: ExchangeInternals)
   otherTokenGroup.querySelectorAll("option").forEach((opt) => opt.remove());
 
   const walletBalances = this._services.inventoryBar.getBalances?.() ?? [];
-  if (walletBalances.length > 0) {
+  const visibleWalletBalances = this._getVisibleTokenBalances(walletBalances);
+  const excludedAddresses = new Set(visibleWalletBalances.map((balance) => balance.address.toLowerCase()));
+  const shouldShowFallbackTokens = this._state.direction !== "deposit";
+
+  if (visibleWalletBalances.length > 0) {
     yourTokenGroup.style.display = "";
-    otherTokenGroup.style.display = "none";
+    visibleWalletBalances.forEach((balance) => appendTokenOption(yourTokenGroup, balance));
+  } else {
+    yourTokenGroup.style.display = shouldShowFallbackTokens ? "none" : "";
 
-    this._getVisibleTokenBalances(walletBalances).forEach((balance) => appendTokenOption(yourTokenGroup, balance));
-
-    if (yourTokenGroup.querySelectorAll("option").length === 0) {
+    if (!shouldShowFallbackTokens) {
       const option = document.createElement("option");
       option.text = "No selectable tokens";
       option.value = "";
@@ -59,10 +76,13 @@ proto._renderTokenOptions = function renderTokenOptions(this: ExchangeInternals)
       option.selected = true;
       yourTokenGroup.appendChild(option);
     }
-  } else {
-    yourTokenGroup.style.display = "none";
+  }
+
+  if (shouldShowFallbackTokens) {
     otherTokenGroup.style.display = "";
-    appendTokenOption(otherTokenGroup, INVENTORY_TOKENS.LUSD);
+    appendFallbackTokenOptions(otherTokenGroup, excludedAddresses);
+  } else {
+    otherTokenGroup.style.display = "none";
   }
 
   if (selectedValue && [...selectEl.options].some((option) => option.value === selectedValue)) {
