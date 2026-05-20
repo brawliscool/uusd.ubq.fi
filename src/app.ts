@@ -13,6 +13,7 @@ import { CentralizedRefreshService, type RefreshData } from "./services/centrali
 // Import components
 import { NotificationManager } from "./components/notification-manager.ts";
 import { SimplifiedExchangeComponent } from "./components/simplified-exchange-component.ts";
+import "./components/simplified-exchange-component.review-fixes.ts";
 import { InventoryBarComponent } from "./components/inventory-bar-component.ts";
 
 // Import utilities
